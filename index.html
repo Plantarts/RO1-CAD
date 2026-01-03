@@ -3,24 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GSD-Lite Web CAD Pro</title>
+    <title>GSD-Lite Web CAD Pro + Grid</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #2b2b2b; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         #canvas-container { flex-grow: 1; background: #ffffff; position: relative; cursor: crosshair; }
-        canvas { display: block; }
-        #terminal { height: 120px; background: #121212; color: #00ff00; padding: 12px; font-family: 'Consolas', monospace; overflow-y: auto; border-top: 2px solid #444; font-size: 13px; line-height: 1.5; }
-        #input-area { background: #1e1e1e; padding: 8px 15px; display: flex; align-items: center; border-top: 1px solid #333; }
+        canvas { position: absolute; top: 0; left: 0; }
+        #terminal { height: 120px; background: #121212; color: #00ff00; padding: 12px; font-family: 'Consolas', monospace; overflow-y: auto; border-top: 2px solid #444; font-size: 13px; z-index: 10; }
+        #input-area { background: #1e1e1e; padding: 8px 15px; display: flex; align-items: center; border-top: 1px solid #333; z-index: 10; }
         input { flex-grow: 1; background: transparent; color: #fff; border: none; padding: 5px; font-family: 'Consolas', monospace; outline: none; font-size: 16px; }
-        .label { color: #00aaff; font-weight: bold; margin-right: 10px; font-family: sans-serif; font-size: 12px; }
+        .toolbar { position: absolute; top: 10px; left: 10px; display: flex; gap: 5px; z-index: 20; }
+        button { background: #444; color: white; border: 1px solid #666; padding: 8px 12px; cursor: pointer; font-size: 12px; border-radius: 4px; }
+        button.active { background: #0078d4; border-color: #00aaff; }
+        .label { color: #00aaff; font-weight: bold; margin-right: 10px; font-size: 12px; }
     </style>
 </head>
 <body>
 
+<div class="toolbar">
+    <button id="gridBtn" class="active">GRID (F7)</button>
+    <button id="snapBtn">SNAP (F9)</button>
+</div>
+
 <div id="canvas-container">
+    <canvas id="gridCanvas"></canvas>
     <canvas id="cadCanvas"></canvas>
 </div>
 
-<div id="terminal">GSD-Lite PRO Initialized. <br>Type 'L' for Line, 'C' for Circle, or click to draw.</div>
+<div id="terminal">GSD-Lite PRO Initialized. <br>Grid toggle enabled. Click 'GRID' or press F7.</div>
 
 <div id="input-area">
     <span class="label">COMMAND ></span>
@@ -28,88 +37,111 @@
 </div>
 
 <script>
-    const canvas = document.getElementById('cadCanvas');
-    const ctx = canvas.getContext('2d');
-    const terminal = document.getElementById('terminal');
+    const cadCanvas = document.getElementById('cadCanvas');
+    const gridCanvas = document.getElementById('gridCanvas');
+    const ctx = cadCanvas.getContext('2d');
+    const gCtx = gridCanvas.getContext('2d');
+    const gridBtn = document.getElementById('gridBtn');
+    const snapBtn = document.getElementById('snapBtn');
     const input = document.getElementById('cmdInput');
 
-    let currentMode = null; 
+    let gridVisible = true;
+    let snapEnabled = false;
+    let gridSpacing = 50;
+    let currentMode = null;
     let points = [];
+    let drawings = []; // Store drawings to redraw when resizing
 
     function resize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight - 150; // Adjust for terminal height
+        const w = window.innerWidth;
+        const h = window.innerHeight - 150;
+        cadCanvas.width = gridCanvas.width = w;
+        cadCanvas.height = gridCanvas.height = h;
+        drawGrid();
+        redrawAll();
     }
     window.addEventListener('resize', resize);
-    resize();
 
-    function log(msg, color = "#00ff00") {
-        terminal.innerHTML += `<br><span style="color:${color}">>> ${msg}</span>`;
-        terminal.scrollTop = terminal.scrollHeight;
+    function drawGrid() {
+        gCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+        if (!gridVisible) return;
+        
+        gCtx.beginPath();
+        gCtx.strokeStyle = "#e0e0e0";
+        gCtx.lineWidth = 0.5;
+
+        for (let x = 0; x <= gridCanvas.width; x += gridSpacing) {
+            gCtx.moveTo(x, 0); gCtx.lineTo(x, gridCanvas.height);
+        }
+        for (let y = gridCanvas.height; y >= 0; y -= gridSpacing) {
+            gCtx.moveTo(0, y); gCtx.lineTo(gridCanvas.width, y);
+        }
+        gCtx.stroke();
     }
 
-    // Convert screen clicks to Cartesian-style coordinates
     function getCoords(e) {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = canvas.height - (e.clientY - rect.top);
+        const rect = cadCanvas.getBoundingClientRect();
+        let x = e.clientX - rect.left;
+        let y = cadCanvas.height - (e.clientY - rect.top);
+        
+        if (snapEnabled) {
+            x = Math.round(x / gridSpacing) * gridSpacing;
+            y = Math.round(y / gridSpacing) * gridSpacing;
+        }
         return { x, y };
     }
 
-    canvas.addEventListener('mousedown', (e) => {
+    gridBtn.addEventListener('click', () => {
+        gridVisible = !gridVisible;
+        gridBtn.classList.toggle('active', gridVisible);
+        drawGrid();
+    });
+
+    snapBtn.addEventListener('click', () => {
+        snapEnabled = !snapEnabled;
+        snapBtn.classList.toggle('active', snapEnabled);
+    });
+
+    cadCanvas.addEventListener('mousedown', (e) => {
         const coords = getCoords(e);
-        
         if (currentMode === 'LINE') {
             points.push(coords);
-            if (points.length === 1) {
-                log("Specify next point:", "#00aaff");
-            } else if (points.length === 2) {
-                drawLine(points[0], points[1]);
-                points = []; // Reset for next line
-                log("Line created. Specify start point or press ESC to exit.");
+            if (points.length === 2) {
+                const line = { type: 'LINE', p1: points[0], p2: points[1] };
+                drawings.push(line);
+                renderLine(line.p1, line.p2);
+                points = [];
             }
         }
     });
 
-    function drawLine(p1, p2) {
+    function renderLine(p1, p2) {
         ctx.save();
-        ctx.translate(0, canvas.height);
+        ctx.translate(0, cadCanvas.height);
         ctx.scale(1, -1);
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
-        ctx.strokeStyle = "#000";
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
         ctx.stroke();
         ctx.restore();
+    }
+
+    function redrawAll() {
+        ctx.clearRect(0, 0, cadCanvas.width, cadCanvas.height);
+        drawings.forEach(d => { if (d.type === 'LINE') renderLine(d.p1, d.p2); });
     }
 
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             const raw = input.value.trim().toUpperCase();
             input.value = '';
-
-            if (raw === 'L') {
-                currentMode = 'LINE';
-                points = [];
-                log("LINE Command Active: Click on canvas or type coords (x1 y1 x2 y2)", "#ffcc00");
-            } else if (raw === 'C') {
-                log("CIRCLE Command selected. (Manual click support coming soon)");
-            } else if (raw === 'CLEAR') {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                log("Canvas Cleared.");
-            } else if (raw.startsWith('L ')) {
-                // Support for direct coordinate entry: L 0 0 100 100
-                const args = raw.split(' ').slice(1).map(Number);
-                if (args.length === 4) drawLine({x:args[0], y:args[1]}, {x:args[2], y:args[3]});
-            }
-        }
-        if (e.key === 'Escape') {
-            currentMode = null;
-            points = [];
-            log("Command Cancelled.");
+            if (raw === 'L') { currentMode = 'LINE'; points = []; }
+            if (raw === 'CLEAR') { drawings = []; redrawAll(); }
         }
     });
+
+    resize();
 </script>
 </body>
 </html>
