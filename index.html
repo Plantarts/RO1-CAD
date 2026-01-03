@@ -3,19 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GSD-Lite PRO | v4.1 Fixed</title>
+    <title>GSD-Lite PRO | v4.2 Precision</title>
     <style>
         :root { --bg: #2b2b2b; --panel: #1e1e1e; --accent: #0078d4; --text: #ffffff; }
         html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', sans-serif; touch-action: none; }
         .toolbar { position: fixed; top: 10px; left: 10px; z-index: 1000; display: flex; flex-wrap: wrap; gap: 8px; background: rgba(30, 30, 30, 0.95); padding: 10px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 1px solid #444; }
         button, select, .snap-dropdown { background: #3c3c3c; color: white; border: 1px solid #555; padding: 10px 14px; cursor: pointer; border-radius: 4px; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; transition: 0.2s; position: relative; }
         button.active { background: var(--accent); border-color: #00aaff; }
-        
         .snap-menu { display: none; position: absolute; top: 100%; left: 0; background: #252525; border: 1px solid #555; border-radius: 4px; padding: 8px; z-index: 1100; min-width: 140px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); }
         .snap-dropdown:hover .snap-menu { display: block; }
         .snap-item { display: flex; align-items: center; gap: 8px; padding: 5px; color: #ccc; font-size: 11px; cursor: pointer; }
-        .snap-item:hover { color: white; }
-
         #canvas-container { flex-grow: 1; position: relative; background: #ffffff; width: 100vw; height: calc(100vh - 140px); }
         canvas { position: absolute; top: 0; left: 0; touch-action: none; }
         #bottom-panel { height: 140px; display: flex; flex-direction: column; z-index: 100; }
@@ -35,7 +32,6 @@
     <select id="layerSel"><option value="0">Layer 0</option><option value="HIDDEN">Hidden</option><option value="DIM">Dimensions</option></select>
     <select id="unitSel"><option value="1">mm</option><option value="0.1">cm</option></select>
     <button id="gridBtn" class="active">GRID</button>
-    
     <div class="snap-dropdown">
         SNAP OPTIONS ▾
         <div class="snap-menu">
@@ -44,7 +40,6 @@
             <label class="snap-item"><input type="checkbox" id="snapMid" checked> Midpoint</label>
         </div>
     </div>
-
     <button id="clearBtn" style="color: #ff6b6b;">CLEAR</button>
 </div>
 
@@ -54,10 +49,10 @@
 </div>
 
 <div id="bottom-panel">
-    <div id="terminal">GSD-Lite PRO v4.1. Grid and Snapping Fixed.</div>
+    <div id="terminal">GSD-Lite PRO v4.2. Use @X,Y for relative input.</div>
     <div id="input-area">
         <span style="color:#00aaff; font-weight:bold; margin-right:10px;">COMMAND ></span>
-        <input type="text" id="cmdInput" autofocus placeholder="Type value...">
+        <input type="text" id="cmdInput" autofocus placeholder="Type value or @x,y...">
     </div>
 </div>
 
@@ -68,20 +63,54 @@
 
     let gridVisible = true, shiftPressed = false, currentMode = null;
     let points = [], drawings = [], undoStack = [], mousePos = null;
-    let selectedObj = null, offsetDist = 20, dragOffset = { x: 0, y: 0 };
-    let activeSnap = null;
+    let selectedObj = null, offsetDist = 20, dragOffset = { x: 0, y: 0 }, activeSnap = null;
 
     const LAYERS = { "0": { color: "#000", dash: [] }, "HIDDEN": { color: "#888", dash: [5, 5] }, "DIM": { color: "#f00", dash: [] } };
 
     function log(msg) { terminal.innerHTML += `<br>>> ${msg}`; terminal.scrollTop = terminal.scrollHeight; }
     function saveState() { undoStack.push(JSON.stringify(drawings)); if (undoStack.length > 30) undoStack.shift(); }
 
+    // --- NEW: COORDINATE PARSING ---
+    cmdInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const input = cmdInput.value.trim();
+            if (input.startsWith('@') && points.length > 0) {
+                const parts = input.substring(1).split(',');
+                if (parts.length === 2) {
+                    const dx = parseFloat(parts[0]), dy = parseFloat(parts[1]);
+                    if (!isNaN(dx) && !isNaN(dy)) {
+                        const newPt = { x: points[0].x + dx, y: points[0].y + dy };
+                        processPoint(newPt);
+                    }
+                }
+            } else {
+                const val = parseFloat(input);
+                if (!isNaN(val)) { offsetDist = val; log(`Offset set to: ${val}`); }
+            }
+            cmdInput.value = "";
+        }
+    });
+
+    function processPoint(c) {
+        if (currentMode === 'LINE' || currentMode === 'CIRCLE') {
+            points.push(c);
+            if (points.length === 2) {
+                saveState();
+                drawings.push({ 
+                    type: currentMode, p1: {...points[0]}, p2: {...points[1]}, 
+                    center: {...points[0]}, radius: Math.hypot(points[1].x-points[0].x, points[1].y-points[0].y), 
+                    layer: layerSel.value 
+                });
+                points = []; refresh(); log("Entity created.");
+            }
+        }
+    }
+
     function resize() {
         const container = document.getElementById('canvas-container');
         cadCanvas.width = gridCanvas.width = container.offsetWidth;
         cadCanvas.height = gridCanvas.height = container.offsetHeight;
-        drawGrid();
-        refresh();
+        drawGrid(); refresh();
     }
 
     function drawGrid() {
@@ -97,15 +126,12 @@
         let best = null, minDist = 20;
         const doEnd = document.getElementById('snapEnd').checked;
         const doMid = document.getElementById('snapMid').checked;
-
         drawings.forEach(d => {
             let pts = [];
             if (d.type === 'LINE') {
                 if (doEnd) { pts.push({x: d.p1.x, y: d.p1.y, type: 'END'}); pts.push({x: d.p2.x, y: d.p2.y, type: 'END'}); }
                 if (doMid) pts.push({x: (d.p1.x + d.p2.x)/2, y: (d.p1.y + d.p2.y)/2, type: 'MID'});
-            } else if (d.type === 'CIRCLE' && doEnd) {
-                pts.push({x: d.center.x, y: d.center.y, type: 'END'});
-            }
+            } else if (d.type === 'CIRCLE' && doEnd) pts.push({x: d.center.x, y: d.center.y, type: 'END'});
             pts.forEach(p => {
                 const dist = Math.hypot(curX - p.x, curY - p.y);
                 if (dist < minDist) { minDist = dist; best = p; }
@@ -117,12 +143,8 @@
     function getCoords(e, relativeToPoint = null) {
         const rect = cadCanvas.getBoundingClientRect();
         let x = e.clientX - rect.left, y = cadCanvas.height - (e.clientY - rect.top);
-
         if (activeSnap) { x = activeSnap.x; y = activeSnap.y; }
-        else if (document.getElementById('snapGrid').checked) {
-            x = Math.round(x / 50) * 50; y = Math.round(y / 50) * 50;
-        }
-
+        else if (document.getElementById('snapGrid').checked) { x = Math.round(x / 50) * 50; y = Math.round(y / 50) * 50; }
         if (shiftPressed && relativeToPoint) {
             const dx = x - relativeToPoint.x, dy = y - relativeToPoint.y;
             if (Math.abs(dx) > Math.abs(dy)) y = relativeToPoint.y; else x = relativeToPoint.x;
@@ -132,8 +154,6 @@
 
     function refresh() {
         ctx.clearRect(0, 0, cadCanvas.width, cadCanvas.height);
-        const scale = parseFloat(unitSel.value);
-        
         drawings.forEach(d => {
             ctx.save(); ctx.translate(0, cadCanvas.height); ctx.scale(1, -1);
             ctx.beginPath(); ctx.strokeStyle = (d === selectedObj) ? "#ff9800" : LAYERS[d.layer].color;
@@ -147,7 +167,6 @@
             const rect = cadCanvas.getBoundingClientRect();
             const rawX = mousePos.clientX - rect.left, rawY = cadCanvas.height - (mousePos.clientY - rect.top);
             activeSnap = findSnap(rawX, rawY);
-            
             if (activeSnap) {
                 ctx.save(); ctx.translate(0, cadCanvas.height); ctx.scale(1, -1);
                 ctx.strokeStyle = "#00ff00"; ctx.lineWidth = 2;
@@ -155,9 +174,7 @@
                 else { ctx.beginPath(); ctx.moveTo(activeSnap.x, activeSnap.y+7); ctx.lineTo(activeSnap.x-7, activeSnap.y-5); ctx.lineTo(activeSnap.x+7, activeSnap.y-5); ctx.closePath(); ctx.stroke(); }
                 ctx.restore();
             }
-
             const cur = getCoords(mousePos, points[0]);
-            // Crosshair
             ctx.strokeStyle = "rgba(0,0,0,0.1)"; ctx.beginPath();
             ctx.moveTo(rawX, 0); ctx.lineTo(rawX, cadCanvas.height);
             ctx.moveTo(0, cadCanvas.height - rawY); ctx.lineTo(cadCanvas.width, cadCanvas.height - rawY);
@@ -173,27 +190,15 @@
     }
 
     cadCanvas.addEventListener('pointermove', (e) => { mousePos = e; refresh(); });
-    cadCanvas.addEventListener('pointerdown', (e) => {
-        const c = getCoords(e, points[0]);
-        if (currentMode === 'LINE' || currentMode === 'CIRCLE') {
-            points.push(c);
-            if (points.length === 2) {
-                saveState();
-                drawings.push({ type: currentMode, p1: {...points[0]}, p2: {...c}, center: {...points[0]}, radius: Math.hypot(c.x-points[0].x, c.y-points[0].y), layer: layerSel.value });
-                points = []; refresh();
-            }
-        }
-        // ... Other modes (Move, Trim) logic remains preserved ...
-    });
-
+    cadCanvas.addEventListener('pointerdown', (e) => { processPoint(getCoords(e, points[0])); });
     document.getElementById('gridBtn').onclick = function() { gridVisible = !gridVisible; this.classList.toggle('active'); drawGrid(); };
-    document.getElementById('lineBtn').onclick = function() { currentMode = 'LINE'; points = []; };
-    document.getElementById('circleBtn').onclick = function() { currentMode = 'CIRCLE'; points = []; };
-    document.getElementById('clearBtn').onclick = () => { drawings = []; refresh(); };
+    document.getElementById('lineBtn').onclick = function() { currentMode = 'LINE'; points = []; setAct(this); };
+    document.getElementById('circleBtn').onclick = function() { currentMode = 'CIRCLE'; points = []; setAct(this); };
+    function setAct(btn) { document.querySelectorAll('.toolbar button').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
+    document.getElementById('clearBtn').onclick = () => { drawings = []; refresh(); log("Cleared."); };
 
     window.addEventListener('resize', resize);
     window.addEventListener('load', resize);
-    // Refresh on snap toggle
     document.querySelectorAll('.snap-item input').forEach(i => i.onchange = refresh);
 </script>
 </body>
