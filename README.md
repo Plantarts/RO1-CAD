@@ -1,3 +1,4 @@
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/plantarts/RO1-CAD/main?filepath=main.py)
 # RO1-CAD
 A Python-based MVP for architectural drafting using AutoCAD-style text commands.
 # GSD-Lite-CAD: Mobile Architectural Drafting Engine
