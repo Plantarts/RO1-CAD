@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GSD-Lite PRO | Ortho Snap</title>
+    <title>GSD-Lite PRO | v3.4 Undo Enabled</title>
     <style>
         :root { --bg: #2b2b2b; --panel: #1e1e1e; --accent: #0078d4; --text: #ffffff; }
         html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', sans-serif; touch-action: none; }
@@ -17,7 +17,6 @@
         #terminal { flex-grow: 1; background: #121212; color: #00ff00; padding: 10px; font-family: 'Consolas', monospace; overflow-y: auto; font-size: 13px; border-top: 2px solid #444; }
         #input-area { background: var(--panel); padding: 10px 15px; display: flex; align-items: center; border-top: 1px solid #333; }
         input { flex-grow: 1; background: transparent; color: #fff; border: none; outline: none; font-family: 'Consolas', monospace; font-size: 16px; }
-        .cmd-label { color: #00aaff; font-weight: bold; margin-right: 10px; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -25,19 +24,19 @@
 <div class="toolbar">
     <button id="lineBtn">LINE</button>
     <button id="circleBtn">CIRCLE</button>
+    <button id="moveBtn" style="background: #6a1b9a;">MOVE</button>
     <select id="layerSel">
         <option value="0">Layer 0</option>
         <option value="HIDDEN">Hidden</option>
         <option value="DIM">Dimensions</option>
     </select>
     <select id="unitSel">
-        <option value="1">Units: mm (1:1)</option>
-        <option value="0.1">Units: cm (1:10)</option>
+        <option value="1">Units: mm</option>
+        <option value="0.1">Units: cm</option>
         <option value="0.0393701">Units: inches</option>
     </select>
     <button id="gridBtn" class="active">GRID</button>
     <button id="snapBtn">SNAP</button>
-    <button id="dxfBtn" style="background: #2e7d32;">EXPORT DXF</button>
     <button id="clearBtn" style="color: #ff6b6b;">CLEAR</button>
 </div>
 
@@ -47,35 +46,50 @@
 </div>
 
 <div id="bottom-panel">
-    <div id="terminal">GSD-Lite PRO v3.1. [SHIFT] for Angle Snap.</div>
+    <div id="terminal">GSD-Lite PRO v3.4. [Ctrl+Z] to Undo. [DEL] to Delete.</div>
     <div id="input-area">
-        <span class="cmd-label">COMMAND ></span>
-        <input type="text" id="cmdInput" autofocus placeholder="L=Line, C=Circle...">
+        <span style="color:#00aaff; font-weight:bold; margin-right:10px;">COMMAND ></span>
+        <input type="text" id="cmdInput" autofocus placeholder="Ready...">
     </div>
 </div>
 
 <script>
     const cadCanvas = document.getElementById('cadCanvas');
     const gridCanvas = document.getElementById('gridCanvas');
-    const ctx = cadCanvas.getContext('2d');
-    const gCtx = gridCanvas.getContext('2d');
-    const terminal = document.getElementById('terminal');
-    const input = document.getElementById('cmdInput');
-    const layerSel = document.getElementById('layerSel');
-    const unitSel = document.getElementById('unitSel');
+    const ctx = cadCanvas.getContext('2d'), gCtx = gridCanvas.getContext('2d');
+    const terminal = document.getElementById('terminal'), layerSel = document.getElementById('layerSel'), unitSel = document.getElementById('unitSel');
 
     let gridVisible = true, snapEnabled = false, shiftPressed = false, currentMode = null;
-    let points = [], drawings = [], mousePos = { x: 0, y: 0 };
+    let points = [], drawings = [], undoStack = [], mousePos = { x: 0, y: 0 };
+    let selectedObj = null, offset = { x: 0, y: 0 };
 
     const LAYERS = { "0": { color: "#000", dash: [] }, "HIDDEN": { color: "#888", dash: [5, 5] }, "DIM": { color: "#f00", dash: [] } };
 
-    window.addEventListener('keydown', (e) => { if (e.key === 'Shift') shiftPressed = true; refresh(); });
-    window.addEventListener('keyup', (e) => { if (e.key === 'Shift') shiftPressed = false; refresh(); });
-
-    function log(msg, color="#00ff00") {
-        terminal.innerHTML += `<br><span style="color:${color}">>> ${msg}</span>`;
-        terminal.scrollTop = terminal.scrollHeight;
+    function saveState() {
+        undoStack.push(JSON.stringify(drawings));
+        if (undoStack.length > 30) undoStack.shift();
     }
+
+    function undo() {
+        if (undoStack.length > 0) {
+            drawings = JSON.parse(undoStack.pop());
+            log("Undo performed.");
+            refresh();
+        }
+    }
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Shift') shiftPressed = true;
+        if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedObj) {
+            saveState();
+            drawings = drawings.filter(d => d !== selectedObj);
+            selectedObj = null; log("Deleted."); refresh();
+        }
+    });
+    window.addEventListener('keyup', (e) => { if (e.key === 'Shift') shiftPressed = false; });
+
+    function log(msg) { terminal.innerHTML += `<br>>> ${msg}`; terminal.scrollTop = terminal.scrollHeight; }
 
     function resize() {
         const container = document.getElementById('canvas-container');
@@ -97,81 +111,87 @@
 
     function getCoords(e, relativeToPoint = null) {
         const rect = cadCanvas.getBoundingClientRect();
-        let x = (e.clientX || (e.touches ? e.touches[0].clientX : 0)) - rect.left;
-        let y = cadCanvas.height - ((e.clientY || (e.touches ? e.touches[0].clientY : 0)) - rect.top);
-        
+        let x = e.clientX - rect.left, y = cadCanvas.height - (e.clientY - rect.top);
         if (snapEnabled) { x = Math.round(x / 50) * 50; y = Math.round(y / 50) * 50; }
-
         if (shiftPressed && relativeToPoint) {
-            const dx = x - relativeToPoint.x;
-            const dy = y - relativeToPoint.y;
-            const angle = Math.atan2(dy, dx);
-            const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
-            const dist = Math.hypot(dx, dy);
-            x = relativeToPoint.x + Math.cos(snappedAngle) * dist;
-            y = relativeToPoint.y + Math.sin(snappedAngle) * dist;
+            const dx = x - relativeToPoint.x, dy = y - relativeToPoint.y;
+            const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+            const d = Math.hypot(dx, dy);
+            x = relativeToPoint.x + Math.cos(angle) * d; y = relativeToPoint.y + Math.sin(angle) * d;
         }
         return { x, y };
     }
 
     function refresh() {
         ctx.clearRect(0, 0, cadCanvas.width, cadCanvas.height);
+        const scale = parseFloat(unitSel.value);
+        
         drawings.forEach(d => {
-            const cfg = LAYERS[d.layer];
             ctx.save(); ctx.translate(0, cadCanvas.height); ctx.scale(1, -1);
-            ctx.beginPath(); ctx.strokeStyle = cfg.color; ctx.setLineDash(cfg.dash); ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.strokeStyle = (d === selectedObj) ? "#ff9800" : LAYERS[d.layer].color;
+            ctx.setLineDash(LAYERS[d.layer].dash); ctx.lineWidth = (d === selectedObj) ? 4 : 2;
             if (d.type === 'LINE') { ctx.moveTo(d.p1.x, d.p1.y); ctx.lineTo(d.p2.x, d.p2.y); }
             else if (d.type === 'CIRCLE') { ctx.arc(d.center.x, d.center.y, d.radius, 0, Math.PI * 2); }
             ctx.stroke(); ctx.restore();
         });
 
-        const s = getCoords(mousePos, points[0]);
-        const scale = parseFloat(unitSel.value);
+        const cur = getCoords(mousePos, points[0]);
+        if (selectedObj) {
+            const dx = cur.x - offset.x, dy = cur.y - offset.y;
+            if (selectedObj.type === 'LINE') { selectedObj.p1.x += dx; selectedObj.p1.y += dy; selectedObj.p2.x += dx; selectedObj.p2.y += dy; }
+            else { selectedObj.center.x += dx; selectedObj.center.y += dy; }
+            offset = cur;
+        }
+
         if (points.length > 0 && currentMode) {
             ctx.save(); ctx.translate(0, cadCanvas.height); ctx.scale(1, -1);
             ctx.beginPath(); ctx.strokeStyle = "rgba(0,120,212,0.5)"; ctx.setLineDash([5,5]);
-            let measure = "";
+            let label = "";
             if (currentMode === 'LINE') {
-                ctx.moveTo(points[0].x, points[0].y); ctx.lineTo(s.x, s.y);
-                measure = `L: ${(Math.hypot(s.x - points[0].x, s.y - points[0].y) * scale).toFixed(2)}`;
+                ctx.moveTo(points[0].x, points[0].y); ctx.lineTo(cur.x, cur.y);
+                label = `L: ${(Math.hypot(cur.x - points[0].x, cur.y - points[0].y) * scale).toFixed(2)}`;
             } else if (currentMode === 'CIRCLE') {
-                const r = Math.hypot(s.x-points[0].x, s.y-points[0].y);
-                ctx.arc(points[0].x, points[0].y, r, 0, Math.PI * 2);
-                measure = `R: ${(r * scale).toFixed(2)}`;
+                const r = Math.hypot(cur.x-points[0].x, cur.y-points[0].y);
+                ctx.arc(points[0].x, points[0].y, r, 0, Math.PI*2);
+                label = `R: ${(r * scale).toFixed(2)}`;
             }
             ctx.stroke(); ctx.restore();
-
-            ctx.save(); ctx.font = "bold 12px Consolas";
-            ctx.fillStyle = "rgba(0,0,0,0.8)";
-            ctx.fillRect(mousePos.clientX + 10, mousePos.clientY - 30, ctx.measureText(measure).width + 10, 20);
-            ctx.fillStyle = "#fff"; ctx.fillText(measure, mousePos.clientX + 15, mousePos.clientY - 15);
-            ctx.restore();
+            ctx.fillStyle = "black"; ctx.font = "bold 12px Segoe UI";
+            ctx.fillText(label, mousePos.clientX + 15, mousePos.clientY - 15);
         }
     }
 
     cadCanvas.addEventListener('pointermove', (e) => { mousePos = e; refresh(); });
     cadCanvas.addEventListener('pointerdown', (e) => {
         const c = getCoords(e, points[0]);
-        if (!currentMode) return;
-        points.push(c);
-        if (points.length === 2) {
-            drawings.push({ 
-                type: currentMode, 
-                p1: points[0], p2: c, // For Line
-                center: points[0], radius: Math.hypot(c.x-points[0].x, c.y-points[0].y), // For Circle
-                layer: layerSel.value 
-            });
-            points = [];
+        if (currentMode === 'MOVE') {
+            if (selectedObj) { selectedObj = null; log("Placed."); }
+            else {
+                selectedObj = drawings.find(d => {
+                    if (d.type === 'CIRCLE') return Math.hypot(c.x-d.center.x, c.y-d.center.y) < d.radius + 10;
+                    const l = Math.hypot(d.p1.x-d.p2.x, d.p1.y-d.p2.y);
+                    const dSum = Math.hypot(c.x-d.p1.x, c.y-d.p1.y) + Math.hypot(c.x-d.p2.x, c.y-d.p2.y);
+                    return dSum >= l - 2 && dSum <= l + 2;
+                });
+                if (selectedObj) { saveState(); offset = c; log("Selected."); }
+            }
+        } else if (currentMode) {
+            points.push(c);
+            if (points.length === 2) {
+                saveState();
+                drawings.push({ type: currentMode, p1: {...points[0]}, p2: {...c}, center: {...points[0]}, radius: Math.hypot(c.x-points[0].x, c.y-points[0].y), layer: layerSel.value });
+                points = []; log("Object created.");
+            }
         }
         refresh();
     });
 
-    document.getElementById('lineBtn').onclick = () => { currentMode = 'LINE'; points = []; };
-    document.getElementById('circleBtn').onclick = () => { currentMode = 'CIRCLE'; points = []; };
-    document.getElementById('dxfBtn').onclick = () => log("DXF Exported (Scaled).");
+    document.getElementById('lineBtn').onclick = () => { currentMode = 'LINE'; points = []; selectedObj = null; log("LINE mode."); };
+    document.getElementById('circleBtn').onclick = () => { currentMode = 'CIRCLE'; points = []; selectedObj = null; log("CIRCLE mode."); };
+    document.getElementById('moveBtn').onclick = () => { currentMode = 'MOVE'; points = []; log("MOVE mode."); };
     document.getElementById('gridBtn').onclick = function() { gridVisible = !gridVisible; this.classList.toggle('active'); drawGrid(); refresh(); };
     document.getElementById('snapBtn').onclick = function() { snapEnabled = !snapEnabled; this.classList.toggle('active'); };
-    document.getElementById('clearBtn').onclick = () => { drawings = []; refresh(); };
+    document.getElementById('clearBtn').onclick = () => { saveState(); drawings = []; refresh(); log("Cleared."); };
 
     setTimeout(resize, 100);
 </script>
