@@ -1,23 +1,28 @@
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/plantarts/RO1-CAD/main?filepath=main.py)
-# RO1-CAD
-A Python-based MVP for architectural drafting using AutoCAD-style text commands.
-# GSD-Lite-CAD: Mobile Architectural Drafting Engine
-**Optimized for Tablet-Based Research and Field Analysis**
+# Research: Women's Workday in the 21st Century
+### (Pesquisa: Jornadas da Mulher do Século XXI)
 
-## 1. Overview
-GSD-Lite-CAD is a lightweight, Python-driven CAD engine designed to run on mobile tablet environments. It facilitates rapid 2D vector drafting via a text-based command-line interface, ideal for site visits and architectural ideation.
+A responsive web application designed to collect and visualize data regarding the workload and domestic contributions of women, partners, and family members.
 
-## 2. Tablet Compatibility
-This project is specifically configured for execution on mobile Python interpreters.
+## 🚀 Features
+* **Interactive Data Entry:** Specialized forms for different profiles (Wife, Autonomous, Husband, Family).
+* **Dynamic Dashboards:** Real-time data visualization using **Chart.js**.
+    * Total participants by profile.
+    * Daily workload distribution.
+    * Percentage of domestic contribution.
+* **Custom Data Labels:** Visual plugin that displays numerical values and percentages directly on chart elements.
+* **Data Persistence:** Uses `localStorage` to keep data on the user's browser without needing a database.
+* **Reporting:** Filterable results by date and activity type, with a print-ready layout.
 
-### Recommended Apps:
-* **Android:** [Pydroid 3](https://play.google.com/store/apps/details?id=ru.iiec.pydroid3)
-* **iPadOS:** [Pyto](https://apps.apple.com/app/pyto-python-3/id1436650069) or [Carnets](https://apps.apple.com/app/carnets/id1450918318)
+## 🛠️ Technical Stack
+* **Frontend:** HTML5, CSS3 (including Print Media Queries).
+* **Logic:** Vanilla JavaScript.
+* **Charts:** [Chart.js](https://www.chartjs.org/) via CDN.
 
-## 3. Setup on Tablet
-1. **Access GitHub:** Open your tablet browser and navigate to this repository.
-2. **Copy Code:** Open `main.py` and copy the entire script.
-3. **Initialize App:** Paste the code into your chosen mobile Python app.
-4. **Install Dependencies:** * In your app's terminal/pip section, install the rendering library:
-   ```bash
-   pip install matplotlib
+## 🔒 Administrative Access
+The results area and data clearing functions are protected by a master password.
+* **Default Password:** `210109`
+
+## 📊 How it Works
+1. Select a profile and fill in the workload details.
+2. Click the green "Secret Button" at the bottom left to view results (requires password).
+3. Filter data by date or specific activity to generate reports.
