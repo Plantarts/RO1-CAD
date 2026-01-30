@@ -2,9 +2,11 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Estimativa das jornadas de trabalho da mulher do século XXI</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
     <style>
         /* Base e Layout Responsivo */
         body { font-family: Arial, sans-serif; background-color: #f4f7f6; color: #333; margin: 10px; font-size: 16px; }
@@ -212,12 +214,34 @@
 </div>
 
 <script>
-    let db = JSON.parse(localStorage.getItem('pesquisaODS')) || [];
+    // --- CONFIGURAÇÃO DO FIREBASE ---
+    // Você deve substituir os valores abaixo pelos dados do seu console Firebase
+    const firebaseConfig = {
+        apiKey: "SUA_API_KEY",
+        authDomain: "SEU_PROJETO.firebaseapp.com",
+        databaseURL: "https://SEU_PROJETO-default-rtdb.firebaseio.com",
+        projectId: "SEU_PROJETO",
+        storageBucket: "SEU_PROJETO.appspot.com",
+        messagingSenderId: "SEU_ID",
+        appId: "SEU_APP_ID"
+    };
+
+    // Inicializar Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    let db = []; 
     const SENHA_MESTRA = "210109"; 
     let charts = {};
 
-    // Define data de hoje no calendário por padrão
     document.getElementById('filtroData').valueAsDate = new Date();
+
+    // Sincronização em Tempo Real: Sempre que o banco mudar, a interface atualiza para todos
+    database.ref('pesquisas').on('value', (snapshot) => {
+        const data = snapshot.val();
+        db = data ? Object.values(data) : [];
+        atualizarInterface();
+    });
 
     function toggleFields() {
         const perfil = document.getElementById('perfil').value;
@@ -271,6 +295,7 @@
         } else if (pass !== null) alert("Código incorreto.");
     }
 
+    // --- CORREÇÃO: GRAVAÇÃO NO BANCO DE DADOS GLOBAL ---
     function salvarPesquisa() {
         const perfilSelect = document.getElementById('perfil');
         if (!perfilSelect.value) return alert("Selecione o perfil.");
@@ -278,22 +303,23 @@
         let registro = {
             perfil: perfilSelect.value,
             detalhe: document.getElementById('valorDetalhe').value,
-            recebeuAjuda: document.getElementById('recebeAjuda').value,
+            recebeuAjuda: document.getElementById('recebeuAjuda').value,
             contribuiu: document.getElementById('contribuiTarefa').value,
             horas: document.getElementById('horasGeral').value,
-            data: new Date().toISOString().split('T')[0] // Salva YYYY-MM-DD
+            data: new Date().toISOString().split('T')[0]
         };
 
-        db.push(registro);
-        localStorage.setItem('pesquisaODS', JSON.stringify(db));
-        
-        perfilSelect.value = "";
-        document.getElementById('recebeAjuda').value = "";
-        document.getElementById('contribuiTarefa').value = "";
-        document.getElementById('horasGeral').value = "";
-        toggleFields();
-        atualizarInterface();
-        alert("Dados salvos!");
+        // Envia para o Firebase
+        database.ref('pesquisas').push(registro)
+            .then(() => {
+                alert("Dados salvos no banco global!");
+                perfilSelect.value = "";
+                document.getElementById('recebeuAjuda').value = "";
+                document.getElementById('contribuiTarefa').value = "";
+                document.getElementById('horasGeral').value = "";
+                toggleFields();
+            })
+            .catch((error) => alert("Erro ao salvar: " + error.message));
     }
 
     function atualizarInterface() {
@@ -304,28 +330,24 @@
         const filtro = document.getElementById('filtroAtividade').value;
         const filtroData = document.getElementById('filtroData').value;
         
-        // --- Calculation for the Date-Specific Grid ---
         const dataFormatada = filtroData.split('-').reverse().join('/');
         document.getElementById('tituloData').innerText = `Participação em: ${dataFormatada}`;
 
         const dadosNaData = db.filter(i => i.data === filtroData);
         document.getElementById('totalDataCount').innerText = dadosNaData.length;
 
-        // Update the Secondary Stat Cards (By Date)
         document.getElementById('dataM').innerText = dadosNaData.filter(i => i.perfil === 'Esposa').length;
         document.getElementById('dataA').innerText = dadosNaData.filter(i => i.perfil === 'Autonoma').length;
         document.getElementById('dataH').innerText = dadosNaData.filter(i => i.perfil === 'Esposo').length;
         document.getElementById('dataF').innerText = dadosNaData.filter(i => i.perfil === 'Familiar').length;
-        // --- ---
         
         const dadosFiltrados = filtro === "Todos" ? db : db.filter(i => i.detalhe === filtro);
-        const countPorData = db.filter(i => i.data === filtroData).length;
-        document.getElementById('totalDataCount').innerText = countPorData;
 
         const categorias = [
             { label: "Esposa", key: 'Esposa' },
             { label: "Autônoma", key: 'Autonoma' },
             { label: "Esposo", key: 'Esposo' },
+
             { label: "Familiares", key: 'Familiar' }
         ];
 
@@ -410,7 +432,9 @@
             plugins: [dataValuePlugin],
             options: { 
                 responsive: true, 
+
                 maintainAspectRatio: false, 
+
                 animation: { duration: 0 },
                 plugins: {
                     title: {
@@ -460,15 +484,14 @@
         criarOuAtualizarGrafico('famContribChart', 'pie', 'Contribuição Familiar', ['Contribui', 'Não Contribui'], [fSim, fNao], ['#8e44ad', '#ecf0f1']);
     }
 
+    // --- CORREÇÃO: LIMPEZA NO BANCO GLOBAL ---
     function limparDados() {
-        if (prompt("?") === SENHA_MESTRA && confirm("Apagar histórico?")) {
-            localStorage.removeItem('pesquisaODS');
-            db = [];
-            atualizarInterface();
+        if (prompt("?") === SENHA_MESTRA && confirm("Apagar histórico global?")) {
+            database.ref('pesquisas').remove()
+                .then(() => alert("Banco de dados resetado."))
+                .catch((e) => alert("Erro ao limpar: " + e.message));
         }
     }
-
-    atualizarInterface();
 </script>
 </body>
 </html>
