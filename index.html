@@ -229,10 +229,16 @@
     const SENHA_MESTRA = "220508"; 
     let charts = {};
 
+    // Sincroniza dados em tempo real e atualiza a variável global do script
     onValue(pesquisasRef, (snapshot) => {
         const data = snapshot.val();
         db = data ? Object.values(data) : [];
-        window.atualizarInterface();
+        console.log("Dados carregados:", db.length);
+        
+        // Se a área de resultados estiver visível, atualiza imediatamente
+        if (document.getElementById('areaResultados').style.display === 'block') {
+            window.atualizarInterface();
+        }
     });
 
     document.getElementById('filtroData').valueAsDate = new Date();
@@ -285,7 +291,9 @@
         const area = document.getElementById('areaResultados');
         if (pass === SENHA_MESTRA) {
             area.style.display = area.style.display === 'none' ? 'block' : 'none';
-            if(area.style.display === 'block') setTimeout(window.atualizarInterface, 100);
+            if(area.style.display === 'block') {
+                setTimeout(() => window.atualizarInterface(), 100);
+            }
         } else if (pass !== null) alert("Código incorreto.");
     };
 
@@ -325,6 +333,7 @@
         const dataFormatada = filtroData ? filtroData.split('-').reverse().join('/') : "--/--/----";
         document.getElementById('tituloData').innerText = `Participação em: ${dataFormatada}`;
 
+        // Filtros de dados baseados no array global 'db'
         const dadosNaData = db.filter(i => i.data === filtroData);
         document.getElementById('totalDataCount').innerText = dadosNaData.length;
 
@@ -343,13 +352,13 @@
         ];
 
         let totaisGerais = { Esposa: 0, Autonoma: 0, Esposo: 0, Familiar: 0 };
-        let dadosPerfis = [];
+        let dadosPerfisCount = [];
 
         categorias.forEach(cat => {
             const itens = dadosFiltrados.filter(i => i.perfil === cat.key);
             const count = itens.length;
             totaisGerais[cat.key] = count;
-            dadosPerfis.push(count);
+            dadosPerfisCount.push(count);
 
             corpo.innerHTML += `
                 <tr>
@@ -368,7 +377,7 @@
         document.getElementById('totalH').innerText = totaisGerais.Esposo;
         document.getElementById('totalF').innerText = totaisGerais.Familiar;
 
-        window.gerarGraficos(categorias.map(c => c.label), dadosPerfis, dadosFiltrados);
+        window.gerarGraficos(categorias.map(c => c.label), dadosPerfisCount, dadosFiltrados);
     };
 
     window.gerarGraficos = function(labelsPerfis, dadosPerfis, dataSet) {
@@ -399,8 +408,9 @@
     };
 
     function criarOuAtualizarGrafico(id, type, label, labels, data, colors) {
-        const ctx = document.getElementById(id);
-        if (!ctx) return;
+        const canvas = document.getElementById(id);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
 
         if (charts[id]) charts[id].destroy();
         
@@ -437,7 +447,7 @@
             }
         };
 
-        charts[id] = new Chart(ctx.getContext('2d'), {
+        charts[id] = new Chart(ctx, {
             type: type,
             data: {
                 labels: labels,
@@ -461,6 +471,8 @@
         if (prompt("?") === SENHA_MESTRA && confirm("Apagar histórico na nuvem permanentemente?")) {
             remove(pesquisasRef).then(() => {
                 alert("Banco de dados limpo!");
+                db = [];
+                window.atualizarInterface();
             });
         }
     };
